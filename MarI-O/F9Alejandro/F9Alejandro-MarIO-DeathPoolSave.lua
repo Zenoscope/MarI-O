@@ -55,11 +55,9 @@ TimeoutConstant = 20
  
 MaxNodes = 1000000
  
-restart = 0
- 
 function countLoad()
-        restart = restart + 1
-        forms.settext(restartLabel, "Restarts: " .. restart)
+        pool.restart = pool.restart + 1
+        forms.settext(restartLabel, "Restarts: " .. pool.restart)
 end
  
 function getPositions()
@@ -213,6 +211,7 @@ function newPool()
         pool.currentGenome = 1
         pool.currentFrame = 0
         pool.maxFitness = 0
+        pool.restart = 0
        
         return pool
 end
@@ -316,7 +315,45 @@ function generateNetwork(genome)
         end
        
         table.sort(genome.genes, function (a,b)
-                return (a.out <b> 0 then
+                return (a.out < b.out)
+        end)
+        for i=1,#genome.genes do
+                local gene = genome.genes[i]
+                if gene.enabled then
+                        if network.neurons[gene.out] == nil then
+                                network.neurons[gene.out] = newNeuron()
+                        end
+                        local neuron = network.neurons[gene.out]
+                        table.insert(neuron.incoming, gene)
+                        if network.neurons[gene.into] == nil then
+                                network.neurons[gene.into] = newNeuron()
+                        end
+                end
+        end
+       
+        genome.network = network
+end
+ 
+function evaluateNetwork(network, inputs)
+        table.insert(inputs, 1)
+        if #inputs ~= Inputs then
+                console.writeline("Incorrect number of neural network inputs.")
+                return {}
+        end
+       
+        for i=1,Inputs do
+                network.neurons[i].value = inputs[i]
+        end
+       
+        for _,neuron in pairs(network.neurons) do
+                local sum = 0
+                for j = 1,#neuron.incoming do
+                        local incoming = neuron.incoming[j]
+                        local other = network.neurons[incoming.into]
+                        sum = sum + incoming.weight * other.value
+                end
+               
+                if #neuron.incoming > 0 then
                         neuron.value = sigmoid(sum)
                 end
         end
@@ -509,11 +546,44 @@ function mutate(genome)
                 end
         end
  
-        if math.random() <genome> 0 do
-                if math.random() <p> 0 do
-                if math.random() <p> 0 do
-                if math.random() <p> 0 do
-                if math.random() <p> 0 do
+        if math.random() < genome.mutationRates["connections"] then
+                pointMutate(genome)
+        end
+       
+        local p = genome.mutationRates["link"]
+        while p > 0 do
+                if math.random() < p then
+                        linkMutate(genome, false)
+                end
+                p = p - 1
+        end
+ 
+        p = genome.mutationRates["bias"]
+        while p > 0 do
+                if math.random() < p then
+                        linkMutate(genome, true)
+                end
+                p = p - 1
+        end
+       
+        p = genome.mutationRates["node"]
+        while p > 0 do
+                if math.random() < p then
+                        nodeMutate(genome)
+                end
+                p = p - 1
+        end
+       
+        p = genome.mutationRates["enable"]
+        while p > 0 do
+                if math.random() < p then
+                        enableDisableMutate(genome, true)
+                end
+                p = p - 1
+        end
+ 
+        p = genome.mutationRates["disable"]
+        while p > 0 do
                 if math.random() < p then
                         enableDisableMutate(genome, false)
                 end
@@ -590,7 +660,41 @@ function rankGlobally()
                 end
         end
         table.sort(global, function (a,b)
-                return (a.fitness <b> b.fitness)
+                return (a.fitness < b.fitness)
+        end)
+       
+        for g=1,#global do
+                global[g].globalRank = g
+        end
+end
+ 
+function calculateAverageFitness(species)
+        local total = 0
+       
+        for g=1,#species.genomes do
+                local genome = species.genomes[g]
+                total = total + genome.globalRank
+        end
+       
+        species.averageFitness = total / #species.genomes
+end
+ 
+function totalAverageFitness()
+        local total = 0
+        for s = 1,#pool.species do
+                local species = pool.species[s]
+                total = total + species.averageFitness
+        end
+ 
+        return total
+end
+ 
+function cullSpecies(cutToOne)
+        for s = 1,#pool.species do
+                local species = pool.species[s]
+               
+                table.sort(species.genomes, function (a,b)
+                        return (a.fitness > b.fitness)
                 end)
                
                 local remaining = math.ceil(#species.genomes/2)
@@ -605,7 +709,28 @@ end
  
 function breedChild(species)
         local child = {}
-        if math.random() <CrossoverChance> b.fitness)
+        if math.random() < CrossoverChance then
+                g1 = species.genomes[math.random(1, #species.genomes)]
+                g2 = species.genomes[math.random(1, #species.genomes)]
+                child = crossover(g1, g2)
+        else
+                g = species.genomes[math.random(1, #species.genomes)]
+                child = copyGenome(g)
+        end
+       
+        mutate(child)
+       
+        return child
+end
+ 
+function removeStaleSpecies()
+        local survived = {}
+ 
+        for s = 1,#pool.species do
+                local species = pool.species[s]
+               
+                table.sort(species.genomes, function (a,b)
+                        return (a.fitness > b.fitness)
                 end)
                
                 if species.genomes[1].fitness > species.topFitness then
@@ -614,7 +739,7 @@ function breedChild(species)
                 else
                         species.staleness = species.staleness + 1
                 end
-                if species.staleness <StaleSpecies>= pool.maxFitness then
+                if species.staleness < StaleSpecies or species.topFitness >= pool.maxFitness then
                         table.insert(survived, species)
                 end
         end
@@ -675,7 +800,79 @@ function newGeneration()
                 end
         end
         cullSpecies(true) -- Cull all but the top member of each species
-        while #children + #pool.species <Population> #pool.species[pool.currentSpecies].genomes then
+        while #children + #pool.species < Population do
+                local species = pool.species[math.random(1, #pool.species)]
+                table.insert(children, breedChild(species))
+        end
+        for c=1,#children do
+                local child = children[c]
+                addToSpecies(child)
+        end
+       
+        pool.generation = pool.generation + 1
+       
+        writeFile("backup." .. pool.generation .. "." .. forms.gettext(saveLoadFile))
+end
+       
+function initializePool()
+        pool = newPool()
+ 
+        for i=1,Population do
+                basic = basicGenome()
+                addToSpecies(basic)
+        end
+ 
+        initializeRun()
+end
+ 
+function clearJoypad()
+        controller = {}
+        for b = 1,#ButtonNames do
+                controller["P1 " .. ButtonNames[b]] = false
+        end
+        joypad.set(controller)
+end
+ 
+function initializeRun()
+        savestate.load(Filename);
+        rightmost = 0
+        pool.currentFrame = 0
+        timeout = TimeoutConstant
+        clearJoypad()
+       
+        local species = pool.species[pool.currentSpecies]
+        local genome = species.genomes[pool.currentGenome]
+        generateNetwork(genome)
+        evaluateCurrent()
+end
+ 
+function evaluateCurrent()
+        local species = pool.species[pool.currentSpecies]
+        local genome = species.genomes[pool.currentGenome]
+ 
+        inputs = getInputs()
+        controller = evaluateNetwork(genome.network, inputs)
+       
+        if controller["P1 Left"] and controller["P1 Right"] then
+                controller["P1 Left"] = false
+                controller["P1 Right"] = false
+        end
+        if controller["P1 Up"] and controller["P1 Down"] then
+                controller["P1 Up"] = false
+                controller["P1 Down"] = false
+        end
+ 
+        joypad.set(controller)
+end
+ 
+if pool == nil then
+        initializePool()
+end
+ 
+ 
+function nextGenome()
+        pool.currentGenome = pool.currentGenome + 1
+        if pool.currentGenome > #pool.species[pool.currentSpecies].genomes then
                 pool.currentGenome = 1
                 pool.currentSpecies = pool.currentSpecies+1
                 if pool.currentSpecies > #pool.species then
@@ -730,19 +927,43 @@ function displayGenome(genome)
        
         for n,neuron in pairs(network.neurons) do
                 cell = {}
-                if n > Inputs and n <MaxNodes> Inputs and gene.into <MaxNodes>= c2.x then
+                if n > Inputs and n <= MaxNodes then
+                        cell.x = 140
+                        cell.y = 40
+                        cell.value = neuron.value
+                        cells[n] = cell
+                end
+        end
+       
+        for n=1,4 do
+                for _,gene in pairs(genome.genes) do
+                        if gene.enabled then
+                                local c1 = cells[gene.into]
+                                local c2 = cells[gene.out]
+                                if gene.into > Inputs and gene.into <= MaxNodes then
+                                        c1.x = 0.75*c1.x + 0.25*c2.x
+                                        if c1.x >= c2.x then
                                                 c1.x = c1.x - 40
                                         end
-                                        if c1.x <90> 220 then
+                                        if c1.x < 90 then
+                                                c1.x = 90
+                                        end
+                                       
+                                        if c1.x > 220 then
                                                 c1.x = 220
                                         end
                                         c1.y = 0.75*c1.y + 0.25*c2.y
                                        
                                 end
-                                if gene.out > Inputs and gene.out <MaxNodes>= c2.x then
+                                if gene.out > Inputs and gene.out <= MaxNodes then
+                                        c2.x = 0.25*c1.x + 0.75*c2.x
+                                        if c1.x >= c2.x then
                                                 c2.x = c2.x + 40
                                         end
-                                        if c2.x <90> 220 then
+                                        if c2.x < 90 then
+                                                c2.x = 90
+                                        end
+                                        if c2.x > 220 then
                                                 c2.x = 220
                                         end
                                         c2.y = 0.25*c1.y + 0.75*c2.y
@@ -756,7 +977,26 @@ function displayGenome(genome)
                 if n > Inputs or cell.value ~= 0 then
                         local color = math.floor((cell.value+1)/2*256)
                         if color > 255 then color = 255 end
-                        if color <0> 0 then
+                        if color < 0 then color = 0 end
+                        local opacity = 0xFF000000
+                        if cell.value == 0 then
+                                opacity = 0x50000000
+                        end
+                        color = opacity + color*0x10000 + color*0x100 + color
+                        gui.drawBox(cell.x-2,cell.y-2,cell.x+2,cell.y+2,opacity,color)
+                end
+        end
+        for _,gene in pairs(genome.genes) do
+                if gene.enabled then
+                        local c1 = cells[gene.into]
+                        local c2 = cells[gene.out]
+                        local opacity = 0xA0000000
+                        if c1.value == 0 then
+                                opacity = 0x20000000
+                        end
+                       
+                        local color = 0x80-math.floor(math.abs(sigmoid(gene.weight))*0x80)
+                        if gene.weight > 0 then
                                 color = opacity + 0x8000 + 0x10000*color
                         else
                                 color = opacity + 0x800000 + 0x100*color
@@ -780,7 +1020,7 @@ function writeFile(filename)
         local file = io.open(filename, "w")
         file:write(pool.generation .. "\n")
         file:write(pool.maxFitness .. "\n")
-        file:write(restart .. "\n")
+        file:write(pool.restart .. "\n")
         file:write(#pool.species .. "\n")
         for n,species in pairs(pool.species) do
                 file:write(species.topFitness .. "\n")
@@ -822,9 +1062,9 @@ function loadFile(filename)
         pool = newPool()
         pool.generation = file:read("*number")
         pool.maxFitness = file:read("*number")
-        restart = file:read("*number")
+        pool.restart = file:read("*number")
         forms.settext(maxFitnessLabel, "Max Fitness: " .. math.floor(pool.maxFitness))
-        forms.settext(restartLabel, "Restarts: " .. restart)
+        forms.settext(restartLabel, "Restarts: " .. pool.restart)
         local numSpecies = file:read("*number")
         for s=1,numSpecies do
                 local species = newSpecies()
@@ -905,7 +1145,7 @@ event.onloadstate(countLoad)
  
 form = forms.newform(200, 260, "Fitness")
 maxFitnessLabel = forms.label(form, "Max Fitness: " .. math.floor(pool.maxFitness), 5, 8)
-restartLabel = forms.label(form, "Restarts: " .. restart, 110, 8)
+restartLabel = forms.label(form, "Restarts: " .. pool.restart, 110, 8)
 showNetwork = forms.checkbox(form, "Show Map", 5, 30)
 showMutationRates = forms.checkbox(form, "Show M-Rates", 5, 52)
 restartButton = forms.button(form, "Restart", initializePool, 5, 77)
@@ -920,9 +1160,9 @@ hideBanner = forms.checkbox(form, "Hide Banner", 5, 190)
 while true do
         local backgroundColor = 0xD0FFFFFF
         if not forms.ischecked(hideBanner) then
-                gui.drawBox(0, 0, 300, 29, backgroundColor, backgroundColor)
+                gui.drawBox(0, 0, 300, 32, backgroundColor, backgroundColor)
         end
- 
+       
         local species = pool.species[pool.currentSpecies]
         local genome = species.genomes[pool.currentGenome]
        
@@ -945,7 +1185,9 @@ while true do
         timeout = timeout - 1
        
         local timeoutBonus = pool.currentFrame / 4
-        if timeout + timeoutBonus <0> 4816 then
+        if timeout + timeoutBonus <= 0 then
+                local fitness = rightmost - pool.currentFrame / 2
+                if gameinfo.getromname() == "Super Mario World (USA)" and rightmost > 4816 then
                         fitness = fitness + 1000
                 end
                 if gameinfo.getromname() == "Super Mario Bros." and rightmost > 3186 then
@@ -982,10 +1224,12 @@ while true do
                 end
         end
         if not forms.ischecked(hideBanner) then
-                gui.drawText(0, 0, "Gen " .. pool.generation .. " species " .. pool.currentSpecies .. " genome " .. pool.currentGenome .. " (" .. math.floor(measured/total*100) .. "%)", 0xFF000000, 10)
-                gui.drawText(0, 10, "Fitness: " .. math.floor(rightmost - (pool.currentFrame) / 2 - (timeout + timeoutBonus)*2/3), 0xFF000000, 10)
-                gui.drawText(100, 10, "Max Fitness: " .. math.floor(pool.maxFitness), 0xFF000000, 10)
-                gui.drawText(0, 20, "Restarts: " .. restart, 0xFF000000, 10)
+                gui.drawText(0, 0, "Gen " .. pool.generation, 0xFF000000, 10, "Arial", "Bold")
+                gui.drawText(50, 0, "Species " .. pool.currentSpecies, 0xFF000000, 10, "Arial", "Bold")
+                gui.drawText(125, 0, "Genome " .. pool.currentGenome .. " (" .. math.floor(measured/total*100) .. "%)", 0xFF000000, 10, "Arial", "Bold")
+                gui.drawText(0, 10, "Fitness: " .. math.floor(rightmost - (pool.currentFrame) / 2 - (timeout + timeoutBonus)*2/3), 0xFF000000, 10, "Arial", "Bold")
+                gui.drawText(100, 10, "Max Fitness: " .. math.floor(pool.maxFitness), 0xFF000000, 10, "Arial", "Bold")
+                gui.drawText(0, 20, "Restarts: " .. pool.restart, 0xFF000000, 10, "Arial", "Bold")
         end
                
         pool.currentFrame = pool.currentFrame + 1
