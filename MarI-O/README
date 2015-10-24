@@ -1,0 +1,20 @@
+How to use MarI/O bot to play Super Mario World.
+ 
+1) EMULATOR: you need to download BizHawk, a multi-emulator that supports SNES with bsnes core.
+URL: http://tasvideos.org/BizHawk/ReleaseHistory.html
+Install the prereq installer first: http://sourceforge.net/projects/bizhawk/files/Prerequisites/bizhawk_prereqs_v1.1.zip/download
+ 
+2) ROM: the correct ROM is "Super Mario World (USA).sfc". Other common ROMS ".smc" won't work.
+ 
+3) SCRIPT: download the Lua script here: http://pastebin.com/download.php?i=ZZmSNaHX
+Don't forget to verify if the script is .lua
+Put this script in a convenient folder (e.g., BizHawk/Lua)
+ 
+4) SAVESTATE: you need the "DP1.state" file. The name must be exactly this, but the state can be from other levels too, not necessarely Donut Plains 1. If you don't have this file, you can create one at the beginning of the desired level.
+With BizHawk, go to File > Save State > Save Named State and save DP1.state. Put this file in the same folder of the Lua script.
+ 
+5) USING THE BOT:
+open the Super Mario World ROM in BizHawk, using the File > Open ROM or dropping the ROM onto the window;
+load the script: Tools > Lua Console > Script > Open Script and select the script that you downloaded.
+ 
+EDIT: if somehow, there was an error, restarting the script may not be enough. So, restart the emulator as well.
