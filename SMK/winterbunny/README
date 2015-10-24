@@ -1,0 +1,7 @@
+This FAQ is written by bjfmonkey for twitch.tv/winterbunny
+ 
+Can I run this?: Yes! Download this zip file: https://mega.co.nz/#!2AcElRqK!SbgZkF-fxwMOO2JyshU_IjID60pGdS6_8ysWWtS-OCA then unzip it and run the first_download_the_non_redistributable_scriptfile.bat file then run EmuHawk.exe and everything should start itself.
+ 
+How does this work?: Magic! But seriously it uses a neural network that runs off lua (the lua script hooks into the emulator)
+ 
+Why does this exist?: Sethbling made the first version called MarI/O it played Super Mario Bros & Super Mario World Winterbunny modified the code to work with SMK.
